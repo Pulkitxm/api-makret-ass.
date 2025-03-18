@@ -81,7 +81,7 @@ export default function ScreenshotCapture() {
       const fullParams: ScreenshotParams = { ...params, url };
       const queryString = generateQueryString(fullParams);
 
-      const response = await fetch(`${API_URL}?${queryString}`, {
+      const response = await fetch(`${API_URL}/api/v1/magicapi/screenshot-api/api/screenshot?${queryString}`, {
         method: "GET",
         headers: {
           accept: `image/${params.outFormat}`,

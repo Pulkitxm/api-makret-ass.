@@ -28,6 +28,15 @@ export default function HomePage() {
         path: "/capture",
         color: "bg-blue-500",
       },
+      {
+        id: "age calculator",
+        title: "Age Calculator",
+        description:
+          "Calculate age from a given date of birth and get the exact age in years, months, and days",
+        icon: Camera,
+        path: "/age-calculator",
+        color: "bg-green-500",
+      },
     ],
     []
   );
@@ -52,11 +61,6 @@ export default function HomePage() {
     <div className="min-h-screen bg-gray-900 text-white">
       <main className="max-w-6xl mx-auto p-6">
         <section className="mb-12 text-center">
-          <h2 className="text-3xl font-bold mb-4">Developer Toolkit</h2>
-          <p className="text-gray-400 max-w-2xl mx-auto">
-            Access powerful web tools to streamline your development workflow
-          </p>
-
           <div className="mt-6 max-w-xl mx-auto">
             <input
               type="text"
