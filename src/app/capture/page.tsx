@@ -9,9 +9,22 @@ import {
   ChevronDown,
   ChevronUp,
   Loader2,
+  Trash2,
+  ExternalLink,
+  Calendar,
+  Clock,
 } from "lucide-react";
 import { API_KEY, API_URL } from "@/lib/constants";
 import Image from "next/image";
+import {
+  saveToStorage,
+  getFromStorage,
+  removeFromStorage,
+  screenshotValidator,
+  blobToBase64,
+  STORAGE_KEY,
+  type ScreenshotItem,
+} from "@/lib/utils";
 
 type ImageFormat = "jpg" | "png" | "webp";
 type ScreenshotState = "idle" | "loading" | "success" | "error";
@@ -30,9 +43,12 @@ export default function ScreenshotCapture() {
   const [url, setUrl] = useState("");
   const [screenshotState, setScreenshotState] =
     useState<ScreenshotState>("idle");
-  const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null);
+  const [currentImageData, setCurrentImageData] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [advancedSettingsOpen, setAdvancedSettingsOpen] = useState(false);
+  const [items, setItems] = useState<ScreenshotItem[]>(
+    getFromStorage<ScreenshotItem>(STORAGE_KEY, screenshotValidator)
+  );
 
   const [params, setParams] = useState<Omit<ScreenshotParams, "url">>({
     resX: 1280,
@@ -61,11 +77,9 @@ export default function ScreenshotCapture() {
   const generateQueryString = useCallback(
     (params: ScreenshotParams): string => {
       const searchParams = new URLSearchParams();
-
       Object.entries(params).forEach(([key, value]) => {
         searchParams.append(key, String(value));
       });
-
       return searchParams.toString();
     },
     []
@@ -81,22 +95,38 @@ export default function ScreenshotCapture() {
       const fullParams: ScreenshotParams = { ...params, url };
       const queryString = generateQueryString(fullParams);
 
-      const response = await fetch(`${API_URL}/api/v1/magicapi/screenshot-api/api/screenshot?${queryString}`, {
-        method: "GET",
-        headers: {
-          accept: `image/${params.outFormat}`,
-          "x-magicapi-key": API_KEY,
-        },
-      });
+      const response = await fetch(
+        `${API_URL}/api/v1/magicapi/screenshot-api/api/screenshot?${queryString}`,
+        {
+          method: "GET",
+          headers: {
+            accept: `image/${params.outFormat}`,
+            "x-magicapi-key": API_KEY,
+          },
+        }
+      );
 
       if (!response.ok) {
         throw new Error(`API Error: ${response.status} ${response.statusText}`);
       }
 
       const blob = await response.blob();
-      const objectUrl = URL.createObjectURL(blob);
+      const imageData = await blobToBase64(blob);
 
-      setScreenshotUrl(objectUrl);
+      const newItem: ScreenshotItem = {
+        input: url,
+        imageData,
+        createdAt: new Date().toISOString(),
+      };
+
+      const updatedItems = saveToStorage(
+        STORAGE_KEY,
+        newItem,
+        screenshotValidator
+      );
+
+      setItems(updatedItems);
+      setCurrentImageData(imageData);
       setScreenshotState("success");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error occurred");
@@ -105,25 +135,38 @@ export default function ScreenshotCapture() {
   }, [isValidUrl, params, url, generateQueryString]);
 
   const downloadScreenshot = useCallback(() => {
-    if (!screenshotUrl) return;
+    if (!currentImageData) return;
 
     const a = document.createElement("a");
-    a.href = screenshotUrl;
-    a.download = `screenshot.${params.outFormat}`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  }, [screenshotUrl, params.outFormat]);
+    a.href = currentImageData;
 
-  const resetForm = useCallback(() => {
-    if (screenshotUrl) {
-      URL.revokeObjectURL(screenshotUrl);
+    // Extract domain for better filename
+    let filename = "screenshot";
+    try {
+      const urlObj = new URL(url);
+      filename = urlObj.hostname.replace(/\./g, "-");
+    } catch {
+      // Use default if parsing fails
     }
 
-    setScreenshotUrl(null);
+    a.download = `${filename}.${params.outFormat}`;
+    a.click();
+  }, [currentImageData, params.outFormat, url]);
+
+  const deleteScreenshot = useCallback((index: number) => {
+    const updatedItems = removeFromStorage<ScreenshotItem>(
+      STORAGE_KEY,
+      index,
+      screenshotValidator
+    );
+    setItems(updatedItems);
+  }, []);
+
+  const resetForm = useCallback(() => {
+    setCurrentImageData(null);
     setScreenshotState("idle");
     setError(null);
-  }, [screenshotUrl]);
+  }, []);
 
   const renderAdvancedSettings = () => (
     <div className="mt-4 p-4 bg-gray-800 rounded-lg">
@@ -218,7 +261,7 @@ export default function ScreenshotCapture() {
 
   return (
     <div className="min-h-screen bg-gray-900 text-white p-6">
-      <div className="max-w-2xl mx-auto">
+      <div className="max-w-3xl mx-auto">
         <header className="mb-8">
           <h1 className="text-2xl font-bold flex items-center">
             <Camera className="mr-2" />
@@ -292,9 +335,9 @@ export default function ScreenshotCapture() {
               </div>
 
               <div className="bg-gray-700 rounded-lg overflow-hidden mb-4">
-                {screenshotUrl && (
+                {currentImageData && (
                   <Image
-                    src={screenshotUrl}
+                    src={currentImageData}
                     alt="Captured screenshot"
                     className="w-full object-contain"
                     width={params.resX}
@@ -326,12 +369,186 @@ export default function ScreenshotCapture() {
           )}
         </div>
 
-        <div className="text-sm text-gray-400">
+        <div className="text-sm text-gray-400 mb-8">
           <p>
             This tool uses the Screenshot API to capture images of websites.
+            Enter a valid URL and customize capture settings if needed.
           </p>
-          <p>Enter a valid URL and customize capture settings if needed.</p>
         </div>
+
+        <ScreenshotHistory items={items} onDelete={deleteScreenshot} />
+      </div>
+    </div>
+  );
+}
+
+interface ScreenshotHistoryProps {
+  items: ScreenshotItem[];
+  onDelete?: (index: number) => void;
+}
+
+function ScreenshotHistory({ items, onDelete }: ScreenshotHistoryProps) {
+  const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
+
+  const sortedItems = useMemo(
+    () =>
+      [...items].sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      ),
+    [items]
+  );
+
+  const toggleExpand = (index: number) => {
+    setExpandedIndex(expandedIndex === index ? null : index);
+  };
+
+  const formatDateTime = (dateString: string): string => {
+    const date = new Date(dateString);
+    return new Intl.DateTimeFormat("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(date);
+  };
+
+  const formatUrl = (url: string): string => {
+    try {
+      const parsedUrl = new URL(url);
+      return `${parsedUrl.hostname}${
+        parsedUrl.pathname.length > 1 ? "..." : ""
+      }`;
+    } catch {
+      return url.length > 30 ? `${url.substring(0, 30)}...` : url;
+    }
+  };
+
+  const downloadScreenshot = (item: ScreenshotItem) => {
+    const a = document.createElement("a");
+    a.href = item.imageData;
+
+    let filename = "screenshot";
+    try {
+      const urlObj = new URL(item.input);
+      filename = urlObj.hostname.replace(/\./g, "-");
+    } catch {
+      // Use default if parsing fails
+    }
+
+    a.download = `${filename}-${
+      new Date(item.createdAt).toISOString().split("T")[0]
+    }.jpg`;
+    a.click();
+  };
+
+  if (sortedItems.length === 0) {
+    return (
+      <div className="mt-8 text-center p-6 bg-gray-800 rounded-lg">
+        <p className="text-gray-400">No screenshots captured yet</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-8">
+      <h2 className="text-xl font-bold mb-4 flex items-center">
+        <Clock className="mr-2" />
+        Screenshot History
+      </h2>
+
+      <div className="space-y-4">
+        {sortedItems.map((item, index) => (
+          <div
+            key={`${item.createdAt}-${index}`}
+            className="bg-gray-800 rounded-lg overflow-hidden"
+          >
+            <div
+              className="p-4 flex items-center justify-between cursor-pointer hover:bg-gray-750"
+              onClick={() => toggleExpand(index)}
+            >
+              <div className="flex items-center">
+                <div className="w-10 h-10 bg-gray-700 rounded overflow-hidden mr-3 flex-shrink-0">
+                  <Image
+                    src={item.imageData}
+                    alt="Thumbnail"
+                    width={40}
+                    height={40}
+                    className="object-cover w-full h-full"
+                  />
+                </div>
+                <div>
+                  <div className="font-medium">{formatUrl(item.input)}</div>
+                  <div className="text-sm text-gray-400 flex items-center">
+                    <Calendar className="mr-1 h-3 w-3" />
+                    {formatDateTime(item.createdAt)}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <button
+                  className="p-2 rounded-full hover:bg-gray-700 text-gray-400 hover:text-white"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    downloadScreenshot(item);
+                  }}
+                  aria-label="Download screenshot"
+                >
+                  <Download className="h-4 w-4" />
+                </button>
+
+                <a
+                  href={item.input}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="p-2 rounded-full hover:bg-gray-700 text-gray-400 hover:text-white"
+                  onClick={(e) => e.stopPropagation()}
+                  aria-label="Visit original website"
+                >
+                  <ExternalLink className="h-4 w-4" />
+                </a>
+
+                {onDelete && (
+                  <button
+                    className="p-2 rounded-full hover:bg-red-600 text-gray-400 hover:text-white"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDelete(index);
+                    }}
+                    aria-label="Delete screenshot"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {expandedIndex === index && (
+              <div className="border-t border-gray-700">
+                <div className="relative h-64 md:h-96 bg-gray-900">
+                  <Image
+                    src={item.imageData}
+                    alt="Captured screenshot"
+                    fill
+                    className="object-contain"
+                  />
+                </div>
+                <div className="p-3 bg-gray-750 text-sm">
+                  <a
+                    href={item.input}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-400 hover:underline break-words"
+                  >
+                    {item.input}
+                  </a>
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
       </div>
     </div>
   );
