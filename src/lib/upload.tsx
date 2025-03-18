@@ -1,11 +1,14 @@
-import { API_KEY, API_URL } from "@/lib/constants";
+import { API_URL } from "@/lib/constants";
 
 export interface UploadResponse {
   status: string;
   result: string;
 }
 
-export const uploadImage = async (file: File): Promise<string> => {
+export const uploadImage = async (
+  file: File,
+  API_KEY: string
+): Promise<string> => {
   const UPLOAD_ENDPOINT = `${API_URL}/api/v1/capix/faceswap/upload/`;
   const formData = new FormData();
   formData.append("file1", file);

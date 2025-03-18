@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback, useRef, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   Upload,
   X,
@@ -9,12 +9,10 @@ import {
   Loader2,
   Clock,
   Trash2,
-  ExternalLink,
-  ChevronDown,
-  ChevronUp,
   Download,
 } from "lucide-react";
-import { API_KEY, API_URL } from "@/lib/constants";
+import ApiKeyInput from "@/components/ApiKeyInput";
+import { API_URL } from "@/lib/constants";
 import { uploadImage } from "@/lib/upload";
 import Image from "next/image";
 import {
@@ -49,6 +47,7 @@ interface AgeDetectionResult {
 }
 
 export default function AgeDetectionPage() {
+  const [apiKey, setApiKey] = useState<string>("");
   const [file, setFile] = useState<File | null>(null);
   const [imageData, setImageData] = useState<string | null>(null);
   const [processingState, setProcessingState] =
@@ -56,13 +55,17 @@ export default function AgeDetectionPage() {
   const [result, setResult] = useState<AgeDetectionResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [uploadedImageUrl, setUploadedImageUrl] = useState<string | null>(null);
-  const [history, setHistory] = useState<AgeDetectionHistoryItem[]>(
-    getFromStorage<AgeDetectionHistoryItem>(
-      AGE_DETECTION_STORAGE_KEY,
-      ageDetectionResultValidator
-    )
-  );
+  const [history, setHistory] = useState<AgeDetectionHistoryItem[]>([]);
   const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
+
+  useEffect(() => {
+    setHistory(
+      getFromStorage<AgeDetectionHistoryItem>(
+        AGE_DETECTION_STORAGE_KEY,
+        ageDetectionResultValidator
+      )
+    );
+  }, []);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -101,12 +104,16 @@ export default function AgeDetectionPage() {
 
   const detectAge = useCallback(
     async (imageUrl: string): Promise<AgeDetectionResult> => {
+      if (!apiKey.trim()) {
+        throw new Error("API key is required");
+      }
+
       const DETECTION_ENDPOINT = `${API_URL}/api/v1/magicapi/age-detector/predictions`;
 
       const response = await fetch(DETECTION_ENDPOINT, {
         method: "POST",
         headers: {
-          "x-magicapi-key": API_KEY,
+          "x-magicapi-key": apiKey,
           "content-type": "application/json",
         },
         body: JSON.stringify({
@@ -134,7 +141,7 @@ export default function AgeDetectionPage() {
         imageData,
       };
     },
-    [imageData]
+    [imageData, apiKey]
   );
 
   const processImage = useCallback(async () => {
@@ -147,7 +154,7 @@ export default function AgeDetectionPage() {
 
       if (!imageUrl) {
         setProcessingState("uploading");
-        imageUrl = await uploadImage(file);
+        imageUrl = await uploadImage(file, apiKey);
         setUploadedImageUrl(imageUrl);
       }
 
@@ -161,7 +168,8 @@ export default function AgeDetectionPage() {
 
       const updatedHistory = saveToStorage(
         AGE_DETECTION_STORAGE_KEY,
-        historyItem,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        historyItem as any,
         ageDetectionResultValidator
       );
 
@@ -172,7 +180,7 @@ export default function AgeDetectionPage() {
       setError(err instanceof Error ? err.message : "Unknown error");
       setProcessingState("error");
     }
-  }, [file, imageData, uploadedImageUrl, detectAge]);
+  }, [file, imageData, uploadedImageUrl, detectAge, apiKey]);
 
   const deleteHistoryItem = useCallback(
     (index: number, e: React.MouseEvent) => {
@@ -292,10 +300,14 @@ export default function AgeDetectionPage() {
       <button
         onClick={processImage}
         disabled={
-          processingState === "uploading" || processingState === "processing"
+          !apiKey.trim() ||
+          processingState === "uploading" ||
+          processingState === "processing"
         }
         className={`mt-4 p-3 rounded-lg flex items-center justify-center transition-colors ${
-          processingState === "uploading" || processingState === "processing"
+          !apiKey.trim() ||
+          processingState === "uploading" ||
+          processingState === "processing"
             ? "bg-gray-700 cursor-not-allowed"
             : "bg-blue-600 hover:bg-blue-700"
         }`}
@@ -368,6 +380,8 @@ export default function AgeDetectionPage() {
             AI Age Detection
           </h1>
         </header>
+
+        <ApiKeyInput onKeyChange={setApiKey} />
 
         <div className="bg-gray-800 rounded-lg p-6 mb-6 shadow-lg">
           {!imageData ? renderDropzone() : renderImagePreview()}

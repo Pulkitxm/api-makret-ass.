@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback, useMemo } from "react";
+import React, { useState, useCallback, useMemo, useEffect } from "react";
 import {
   Camera,
   Download,
@@ -14,7 +14,7 @@ import {
   Calendar,
   Clock,
 } from "lucide-react";
-import { API_KEY, API_URL } from "@/lib/constants";
+import { API_URL } from "@/lib/constants";
 import Image from "next/image";
 import {
   saveToStorage,
@@ -25,6 +25,7 @@ import {
   STORAGE_KEY,
   type ScreenshotItem,
 } from "@/lib/utils";
+import ApiKeyInput from "@/components/ApiKeyInput";
 
 type ImageFormat = "jpg" | "png" | "webp";
 type ScreenshotState = "idle" | "loading" | "success" | "error";
@@ -40,15 +41,18 @@ interface ScreenshotParams {
 }
 
 export default function ScreenshotCapture() {
+  const [apiKey, setApiKey] = useState<string>("");
   const [url, setUrl] = useState("");
-  const [screenshotState, setScreenshotState] =
-    useState<ScreenshotState>("idle");
+  const [screenshotState, setScreenshotState] = useState<ScreenshotState>("idle");
   const [currentImageData, setCurrentImageData] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [advancedSettingsOpen, setAdvancedSettingsOpen] = useState(false);
-  const [items, setItems] = useState<ScreenshotItem[]>(
-    getFromStorage<ScreenshotItem>(STORAGE_KEY, screenshotValidator)
-  );
+  const [items, setItems] = useState<ScreenshotItem[]>([]);
+  const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
+
+  useEffect(() => {
+    setItems(getFromStorage<ScreenshotItem>(STORAGE_KEY, screenshotValidator));
+  }, []);
 
   const [params, setParams] = useState<Omit<ScreenshotParams, "url">>({
     resX: 1280,
@@ -86,7 +90,7 @@ export default function ScreenshotCapture() {
   );
 
   const captureScreenshot = useCallback(async () => {
-    if (!isValidUrl) return;
+    if (!isValidUrl || !apiKey.trim()) return;
 
     try {
       setScreenshotState("loading");
@@ -101,7 +105,7 @@ export default function ScreenshotCapture() {
           method: "GET",
           headers: {
             accept: `image/${params.outFormat}`,
-            "x-magicapi-key": API_KEY,
+            "x-magicapi-key": apiKey,
           },
         }
       );
@@ -132,7 +136,7 @@ export default function ScreenshotCapture() {
       setError(err instanceof Error ? err.message : "Unknown error occurred");
       setScreenshotState("error");
     }
-  }, [isValidUrl, params, url, generateQueryString]);
+  }, [isValidUrl, params, url, generateQueryString, apiKey]);
 
   const downloadScreenshot = useCallback(() => {
     if (!currentImageData) return;
@@ -140,33 +144,41 @@ export default function ScreenshotCapture() {
     const a = document.createElement("a");
     a.href = currentImageData;
 
-    // Extract domain for better filename
     let filename = "screenshot";
     try {
       const urlObj = new URL(url);
       filename = urlObj.hostname.replace(/\./g, "-");
-    } catch {
-      // Use default if parsing fails
-    }
+    } catch {}
 
     a.download = `${filename}.${params.outFormat}`;
     a.click();
   }, [currentImageData, params.outFormat, url]);
 
-  const deleteScreenshot = useCallback((index: number) => {
+  const deleteScreenshot = useCallback((index: number, e: React.MouseEvent) => {
+    e.stopPropagation();
     const updatedItems = removeFromStorage<ScreenshotItem>(
       STORAGE_KEY,
       index,
       screenshotValidator
     );
     setItems(updatedItems);
-  }, []);
+    
+    if (expandedIndex === index) {
+      setExpandedIndex(null);
+    } else if (expandedIndex !== null && expandedIndex > index) {
+      setExpandedIndex(expandedIndex - 1);
+    }
+  }, [expandedIndex]);
 
   const resetForm = useCallback(() => {
     setCurrentImageData(null);
     setScreenshotState("idle");
     setError(null);
   }, []);
+
+  const toggleExpand = useCallback((index: number) => {
+    setExpandedIndex(expandedIndex === index ? null : index);
+  }, [expandedIndex]);
 
   const renderAdvancedSettings = () => (
     <div className="mt-4 p-4 bg-gray-800 rounded-lg">
@@ -259,6 +271,54 @@ export default function ScreenshotCapture() {
     </div>
   );
 
+  const formatDateTime = useCallback((dateString: string): string => {
+    const date = new Date(dateString);
+    return new Intl.DateTimeFormat("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(date);
+  }, []);
+
+  const formatUrl = useCallback((url: string): string => {
+    try {
+      const parsedUrl = new URL(url);
+      return `${parsedUrl.hostname}${
+        parsedUrl.pathname.length > 1 ? "..." : ""
+      }`;
+    } catch {
+      return url.length > 30 ? `${url.substring(0, 30)}...` : url;
+    }
+  }, []);
+
+  const downloadHistoryScreenshot = useCallback((item: ScreenshotItem, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const a = document.createElement("a");
+    a.href = item.imageData;
+
+    let filename = "screenshot";
+    try {
+      const urlObj = new URL(item.input);
+      filename = urlObj.hostname.replace(/\./g, "-");
+    } catch {}
+
+    a.download = `${filename}-${
+      new Date(item.createdAt).toISOString().split("T")[0]
+    }.jpg`;
+    a.click();
+  }, []);
+
+  const sortedItems = useMemo(
+    () =>
+      [...items].sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      ),
+    [items]
+  );
+
   return (
     <div className="min-h-screen bg-gray-900 text-white p-6">
       <div className="max-w-3xl mx-auto">
@@ -268,6 +328,8 @@ export default function ScreenshotCapture() {
             Screenshot Capture Tool
           </h1>
         </header>
+
+        <ApiKeyInput onKeyChange={setApiKey} />
 
         <div className="bg-gray-800 rounded-lg p-6 mb-6 shadow-lg">
           {screenshotState === "idle" ? (
@@ -306,9 +368,9 @@ export default function ScreenshotCapture() {
 
               <button
                 onClick={captureScreenshot}
-                disabled={!isValidUrl}
+                disabled={!isValidUrl || !apiKey.trim()}
                 className={`w-full p-3 rounded-lg flex items-center justify-center ${
-                  isValidUrl
+                  isValidUrl && apiKey.trim()
                     ? "bg-blue-600 hover:bg-blue-700"
                     : "bg-gray-700 opacity-50 cursor-not-allowed"
                 } transition-colors`}
@@ -376,179 +438,103 @@ export default function ScreenshotCapture() {
           </p>
         </div>
 
-        <ScreenshotHistory items={items} onDelete={deleteScreenshot} />
-      </div>
-    </div>
-  );
-}
+        <div className="mt-8">
+          <h2 className="text-xl font-bold mb-4 flex items-center">
+            <Clock className="mr-2" />
+            Screenshot History
+          </h2>
 
-interface ScreenshotHistoryProps {
-  items: ScreenshotItem[];
-  onDelete?: (index: number) => void;
-}
-
-function ScreenshotHistory({ items, onDelete }: ScreenshotHistoryProps) {
-  const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
-
-  const sortedItems = useMemo(
-    () =>
-      [...items].sort(
-        (a, b) =>
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-      ),
-    [items]
-  );
-
-  const toggleExpand = (index: number) => {
-    setExpandedIndex(expandedIndex === index ? null : index);
-  };
-
-  const formatDateTime = (dateString: string): string => {
-    const date = new Date(dateString);
-    return new Intl.DateTimeFormat("en-US", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(date);
-  };
-
-  const formatUrl = (url: string): string => {
-    try {
-      const parsedUrl = new URL(url);
-      return `${parsedUrl.hostname}${
-        parsedUrl.pathname.length > 1 ? "..." : ""
-      }`;
-    } catch {
-      return url.length > 30 ? `${url.substring(0, 30)}...` : url;
-    }
-  };
-
-  const downloadScreenshot = (item: ScreenshotItem) => {
-    const a = document.createElement("a");
-    a.href = item.imageData;
-
-    let filename = "screenshot";
-    try {
-      const urlObj = new URL(item.input);
-      filename = urlObj.hostname.replace(/\./g, "-");
-    } catch {
-      // Use default if parsing fails
-    }
-
-    a.download = `${filename}-${
-      new Date(item.createdAt).toISOString().split("T")[0]
-    }.jpg`;
-    a.click();
-  };
-
-  if (sortedItems.length === 0) {
-    return (
-      <div className="mt-8 text-center p-6 bg-gray-800 rounded-lg">
-        <p className="text-gray-400">No screenshots captured yet</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="mt-8">
-      <h2 className="text-xl font-bold mb-4 flex items-center">
-        <Clock className="mr-2" />
-        Screenshot History
-      </h2>
-
-      <div className="space-y-4">
-        {sortedItems.map((item, index) => (
-          <div
-            key={`${item.createdAt}-${index}`}
-            className="bg-gray-800 rounded-lg overflow-hidden"
-          >
-            <div
-              className="p-4 flex items-center justify-between cursor-pointer hover:bg-gray-750"
-              onClick={() => toggleExpand(index)}
-            >
-              <div className="flex items-center">
-                <div className="w-10 h-10 bg-gray-700 rounded overflow-hidden mr-3 flex-shrink-0">
-                  <Image
-                    src={item.imageData}
-                    alt="Thumbnail"
-                    width={40}
-                    height={40}
-                    className="object-cover w-full h-full"
-                  />
-                </div>
-                <div>
-                  <div className="font-medium">{formatUrl(item.input)}</div>
-                  <div className="text-sm text-gray-400 flex items-center">
-                    <Calendar className="mr-1 h-3 w-3" />
-                    {formatDateTime(item.createdAt)}
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center space-x-2">
-                <button
-                  className="p-2 rounded-full hover:bg-gray-700 text-gray-400 hover:text-white"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    downloadScreenshot(item);
-                  }}
-                  aria-label="Download screenshot"
-                >
-                  <Download className="h-4 w-4" />
-                </button>
-
-                <a
-                  href={item.input}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="p-2 rounded-full hover:bg-gray-700 text-gray-400 hover:text-white"
-                  onClick={(e) => e.stopPropagation()}
-                  aria-label="Visit original website"
-                >
-                  <ExternalLink className="h-4 w-4" />
-                </a>
-
-                {onDelete && (
-                  <button
-                    className="p-2 rounded-full hover:bg-red-600 text-gray-400 hover:text-white"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDelete(index);
-                    }}
-                    aria-label="Delete screenshot"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                )}
-              </div>
+          {sortedItems.length === 0 ? (
+            <div className="text-center p-6 bg-gray-800 rounded-lg">
+              <p className="text-gray-400">No screenshots captured yet</p>
             </div>
+          ) : (
+            <div className="space-y-4">
+              {sortedItems.map((item, index) => (
+                <div
+                  key={`${item.createdAt}-${index}`}
+                  className="bg-gray-800 rounded-lg overflow-hidden"
+                >
+                  <div className="p-4 flex items-center justify-between hover:bg-gray-750">
+                    <div 
+                      className="flex items-center cursor-pointer"
+                      onClick={() => toggleExpand(index)}
+                    >
+                      <div className="w-10 h-10 bg-gray-700 rounded overflow-hidden mr-3 flex-shrink-0">
+                        <Image
+                          src={item.imageData}
+                          alt="Thumbnail"
+                          width={40}
+                          height={40}
+                          className="object-cover w-full h-full"
+                        />
+                      </div>
+                      <div>
+                        <div className="font-medium">{formatUrl(item.input)}</div>
+                        <div className="text-sm text-gray-400 flex items-center">
+                          <Calendar className="mr-1 h-3 w-3" />
+                          {formatDateTime(item.createdAt)}
+                        </div>
+                      </div>
+                    </div>
 
-            {expandedIndex === index && (
-              <div className="border-t border-gray-700">
-                <div className="relative h-64 md:h-96 bg-gray-900">
-                  <Image
-                    src={item.imageData}
-                    alt="Captured screenshot"
-                    fill
-                    className="object-contain"
-                  />
+                    <div className="flex items-center space-x-2">
+                      <button
+                        className="p-2 rounded-full hover:bg-gray-700 text-gray-400 hover:text-white"
+                        onClick={(e) => downloadHistoryScreenshot(item, e)}
+                        aria-label="Download screenshot"
+                      >
+                        <Download className="h-4 w-4" />
+                      </button>
+
+                      <a
+                        href={item.input}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="p-2 rounded-full hover:bg-gray-700 text-gray-400 hover:text-white"
+                        onClick={(e) => e.stopPropagation()}
+                        aria-label="Visit original website"
+                      >
+                        <ExternalLink className="h-4 w-4" />
+                      </a>
+
+                      <button
+                        className="p-2 rounded-full hover:bg-red-600 text-gray-400 hover:text-white"
+                        onClick={(e) => deleteScreenshot(index, e)}
+                        aria-label="Delete screenshot"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {expandedIndex === index && (
+                    <div className="border-t border-gray-700">
+                      <div className="relative h-64 md:h-96 bg-gray-900">
+                        <Image
+                          src={item.imageData}
+                          alt="Captured screenshot"
+                          fill
+                          className="object-contain"
+                        />
+                      </div>
+                      <div className="p-3 bg-gray-750 text-sm">
+                        <a
+                          href={item.input}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-400 hover:underline break-words"
+                        >
+                          {item.input}
+                        </a>
+                      </div>
+                    </div>
+                  )}
                 </div>
-                <div className="p-3 bg-gray-750 text-sm">
-                  <a
-                    href={item.input}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-400 hover:underline break-words"
-                  >
-                    {item.input}
-                  </a>
-                </div>
-              </div>
-            )}
-          </div>
-        ))}
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
