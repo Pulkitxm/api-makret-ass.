@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { Key, Eye, EyeOff } from "lucide-react";
+import Link from "next/link";
 
 const API_KEY_STORAGE = "magicapi_key";
 
@@ -47,10 +48,19 @@ export default function ApiKeyInput({ onKeyChange }: ApiKeyInputProps) {
   }, []);
 
   return (
-    <div className="mb-6 bg-gray-800 rounded-lg p-4 shadow-md">
+    <div className="relative mb-6 bg-gray-800 rounded-lg p-4 shadow-md">
       <div className="flex items-center mb-2">
         <Key className="h-4 w-4 mr-2 text-gray-400" />
         <h3 className="text-sm font-medium text-gray-300">API Key</h3>
+        <Link
+          href="https://api.market"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="ml-auto flex items-center text-blue-400 hover:text-blue-300 text-sm"
+        >
+          <span>Get API key</span>
+          <span className="ml-1 text-xs">↗</span>
+        </Link>
       </div>
 
       <div className="relative">
@@ -58,7 +68,7 @@ export default function ApiKeyInput({ onKeyChange }: ApiKeyInputProps) {
           type={showKey ? "text" : "password"}
           value={apiKey}
           onChange={handleKeyChange}
-          placeholder="Enter your MagicAPI key"
+          placeholder="Enter your API.market key"
           className="w-full p-2 pr-20 rounded bg-gray-700 text-white border border-gray-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
         />
 
